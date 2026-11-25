@@ -1,0 +1,3 @@
+dataset,method,reader,samples,exact,true_positive,predicted_items,gold_items,acc,recall,f1,with_retrieved_context
+FCM,OCR + BM25,qwen3-vl-2b-q4,53,0,192,811,196,0.0,97.95918367346938,38.1330685203575,0
+FCM,OCR + BGE-M3 (dense),qwen3-vl-2b-q4,53,0,192,811,196,0.0,97.95918367346938,38.1330685203575,0

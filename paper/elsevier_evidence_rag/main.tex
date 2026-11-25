@@ -1,0 +1,187 @@
+% !TeX program = pdflatex
+% Based on Elsevier's official elsarticle numbered-reference template.
+\documentclass[preprint,12pt]{elsarticle}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{amsmath,amssymb}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\makeatletter
+\let\inputtablerows\@@input
+\makeatother
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta,patterns}
+\definecolor{methodInk}{HTML}{482E24}
+\definecolor{methodAccent}{HTML}{A15A39}
+\definecolor{methodRule}{HTML}{B99378}
+\definecolor{methodPeach}{HTML}{FBE7DA}
+\definecolor{methodCream}{HTML}{FFF3D8}
+\usepackage{microtype}
+\usepackage{enumitem}
+\usepackage{needspace}
+\usepackage{placeins}
+\usepackage[hyphens]{url}
+\newcommand{\urlprefix}{URL\enspace}
+\usepackage[hidelinks]{hyperref}
+\biboptions{numbers,sort&compress}
+\widowpenalty=10000
+\clubpenalty=10000
+\journal{Journal to be selected}
+\begin{document}
+\begin{frontmatter}
+\title{GeoEvidence-RAG: Local Geometric Evidence for Reliable Engineering Drawing Question Answering}
+\author{Author names to be supplied}
+\affiliation{organization={Affiliation to be supplied}}
+\begin{abstract}
+Engineering drawing question answering requires evidence that supports precise geometric reasoning rather than mere query similarity. Existing methods ignore local structural differences in engineering drawings; moreover, unreliable spatial reasoning under strict projection rules and geometric constraints makes decisive clues easy to overlook, often leading to incorrect answers. To bridge this gap, we propose Geometric Evidence (GeoEvidence-RAG), an evidence-oriented Retrieval-Augmented Generation framework for engineering drawings and associated CAD records. First, we propose the Local Geometric Evidence Unit, which links component and feature identities with available CAD faces, multi-view regions, geometric attributes, and provenance metadata. Second, to tackle hard negative samples in CAD drawings, we design a two-stage retrieval strategy that integrates global CLIP-based candidate selection with a lightweight evidence-aware reranking module. Furthermore, a budgeted selector is introduced to penalize redundancy while prioritizing edge-condition coverage, performing structured aggregation and explicit completeness checks across the whole corpus for given queries. Finally, we construct CADVQA, a mechanical drawing understanding benchmark comprising 3.3k high-density engineering images and 21k question-answering pairs across 9 distinct fine-grained tasks, offering a comprehensive evaluation platform to advance MLLM comprehension of real-world mechanical drawings. Extensive experimental results demonstrate that GeoEvidence-RAG achieves state-of-the-art performance across four benchmark datasets.
+\end{abstract}
+\begin{keyword}
+Engineering Drawing Understanding \sep Retrieval Augmented Generation \sep Local geometric evidence \sep Evidence reranking
+\end{keyword}
+\end{frontmatter}
+
+\section{Introduction}
+\label{sec:introduction}
+
+Mechanical engineering drawings are a primary medium for communicating geometry, tolerances, and assembly intent in mechanical design and inspection. They provide a shared technical basis for specifying component requirements, coordinating manufacturing operations, and assessing whether produced parts satisfy the intended form, fit, and function. Geometric dimensioning and tolerancing formalizes this communication through symbols and interpretation rules that relate design requirements to the features being controlled~\cite{asme2018y145}. Unlike natural images, engineering drawings encode engineering semantics through a compact, standardized graphical language that combines multiple orthographic projections, dense dimension annotations, sectional views, engineering symbols, and structured text~\cite{kou2026mechvqa}. The meaning of an individual element depends on its association with surrounding geometry and with other representations of the same component. A dimension acquires its engineering significance through the feature to which it applies, while a sectional view exposes information that may be hidden in an exterior projection. Standards governing views, sections, and cuts establish conventions for expressing these relationships consistently~\cite{iso2022views}. Accordingly, drawing comprehension involves recognizing dimensions and symbols, associating observations across views under projection constraints, and interpreting specifications using domain conventions. This dependence on spatial organization is consistent with findings in document understanding, where page layout and the relationships between textual and visual elements contribute to information extraction and question answering~\cite{xu2019layoutlm,mathew2020docvqa}. For mechanical drawings, these relationships additionally determine physical interpretations, including whether a hole terminates inside a part or whether two views depict one feature. Natural-language question answering offers a way to access this information when checking a drawing, reviewing component specifications, or comparing records in an engineering archive. Reliable answers require the relevant numerical values and graphical observations to remain connected to their features and sources, making the preservation of local engineering semantics central to drawing-based knowledge access.
+
+Consider a drawing query that asks how many through-holes a flange contains. A search for the part name and hole diameter may retrieve the correct sheet, yet the diameter alone says nothing about where a bore ends. The answer requires matching each opening in the end view to its axial section, checking whether the bore reaches the opposite face, and counting each physical hole once. The scope of the evidence changes when the question concerns a collection of parts~\cite{li2025mechrag}. For example, even an exact volume for every retrieved part cannot establish which part is largest if the search omitted an eligible part. In both cases, the system must identify the observations needed to justify an answer and determine whether the available records supply them.
+
+For the flange, a second end view may corroborate the location of a hole while leaving its depth unresolved. A section can settle the question only if its cutting plane passes through that same hole. For the volume comparison, the corresponding check is whether a volume is available for every eligible part and whether the values use comparable units. Figure~\ref{fig:geoevidence-workflow} shows how GeoEvidence-RAG links observations to individual features and checks the scope of a collection when the answer depends on all its members.
+
+\begin{figure}[!ht]
+  \centering
+  \includegraphics[width=\linewidth]{figures/workflow-plate.pdf}
+  \caption{GeoEvidence-RAG illustrated on a mounting flange. (A) The end view locates bolt hole H1, and the enlarged outlet in section B--B establishes its termination. Both regions enter one feature record. A separate registry defines the population for collection queries. (B) Global retrieval supplies candidates, the local reranker compares geometry, and the selector retains the observations needed to cite the answer. The bottom strip shows how the reranker is trained.}
+  \label{fig:geoevidence-workflow}
+\end{figure}
+
+The examples in Figure~\ref{fig:geoevidence-comparison} show how the value of an additional observation depends on the question. In Steps~1 and~2, the same sectional view serves two purposes. Its open exit distinguishes the through bore from a visually similar blind bore. Once the section is matched to the opening in the end view, it also confirms that the two regions describe a single feature. A second crop of the opening would repeat evidence already available, whereas the axial section supplies the missing observation about termination.
+
+A collection query requires a different check. The largest volume in a shortlist establishes a lower bound on the collection maximum. To identify the part that attains that maximum, the system must also account for the eligible parts outside the shortlist. If a volume is missing, the system can still identify the largest part among those with known volumes and state that narrower scope.
+
+\enlargethispage{\baselineskip}
+\begin{figure}[!ht]
+  \centering
+  \includegraphics[width=\linewidth]{figures/counterexample-plate.pdf}
+  \caption{Comparison on a shared drawing archive. (A) Conventional whole-drawing top-$K$ retrieval supplies similar end views and independent regions, and its shortlist omits P3. (B) GeoEvidence-RAG retrieves axial sections that distinguish P1's outlet from P2's end wall (Step~1), links two views of the same bore to one feature key (Step~2), and verifies that P3 has the largest volume across all eligible parts (Step~3). If P3's volume is missing, the collection maximum remains unresolved.}
+  \label{fig:geoevidence-comparison}
+\end{figure}
+
+These cases expose three limitations of relying on retrieval relevance for engineering answers.
+
+\textbf{Limitation~1: Insufficient claim-level evidence support.}\par\nopagebreak
+Retrieving a relevant drawing does not establish support for each geometric claim~\cite{gao2023alce,gao2022rarr}. Reliable answers require links to the specific features, views, and attributes that justify them, such as the sectional evidence distinguishing a blind hole from a through-hole.
+
+\textbf{Limitation~2: Limited discrimination of local geometry and cross-view identity.}\par\nopagebreak
+Global semantic similarity does not guarantee correct relational interpretation~\cite{thrush2022winoground}. Parts with similar outlines may differ in hole count, termination, or coaxiality. Without explicit cross-view correspondence, repeated depictions of one feature may also be counted as separate instances.
+
+\textbf{Limitation~3: Incomplete condition coverage and collection scope.}\par\nopagebreak
+A fixed top-$K$ context may repeat observations while omitting conditions needed to answer the question. Context diversification or hierarchical organization~\cite{carbonell1998mmr,sarthi2024raptor,edge2024graphrag} does not by itself establish collection completeness. For example, the largest-volume part cannot be identified reliably if eligible parts are absent from the comparison.
+
+To address these limitations, we propose \textit{GeoEvidence-RAG}, a framework that organizes retrieval and answer construction around verifiable local geometric evidence.
+First, we construct local geometric evidence units that link part and feature identifiers to view regions, geometric attributes, and source references. We retain CAD face identifiers when available and use a shared feature identity to connect observations across views and avoid duplicate counts. We keep conflicting observations separate so that later checks can expose inconsistencies.
+Then, we retrieve candidate drawings with a frozen CLIP encoder and use a lightweight multilayer perceptron to rerank them based on local geometry. We train the reranker on visually similar parts that differ in key features, including single-feature variants when editable CAD models are available. We split the data by part family, keeping original parts, their variants, and rendered views together to evaluate generalization to unseen families.
+Next, we decompose each question into verifiable conditions and select complementary evidence within a fixed budget, balancing coverage, redundancy, and cost. We track which records support conditions such as feature identity, count, and termination, and flag any condition for which support is missing. For questions about totals or extrema, we check that every eligible part has the required attributes before reporting a result for the full collection. We cite the supporting records and qualify claims when evidence is incomplete.
+Finally, we use our self-built CADVQA benchmark to evaluate recognition, text and table interpretation, structural reasoning, and assembly relationships. We also examine whether answers can be traced to their supporting observations.
+
+\Needspace{5\baselineskip}
+The main contributions are as follows:
+\begin{itemize}[leftmargin=*,itemsep=0.45em]
+\item \textbf{Local geometric evidence representation.}
+We link feature and part identities to local view regions, geometric attributes, available CAD faces, and provenance, supporting cross-view consolidation and traceability from answer claims to source observations.
+\item \textbf{Geometry-sensitive evidence reranking.}
+We combine global candidate retrieval with a lightweight reranker designed to distinguish critical local differences, using structural hard negatives and a variant-family-disjoint training protocol with a frozen visual encoder.
+\item \textbf{Complementary evidence selection with completeness checks.}
+We select evidence through condition coverage, redundancy, and cost, and separately verify the collection scope and required attributes for exhaustive comparisons and aggregates.
+\item \textbf{A self-built engineering drawing dataset.}
+We curate drawing-based tasks spanning entity recognition, text and table interpretation, structural reasoning, and assembly relationships, providing an application-oriented setting for evaluating answers and inspecting their supporting evidence.
+\end{itemize}
+
+\section{Related work}
+\label{sec:related_work}
+
+\subsection{Document understanding and geometric representations}
+\label{sec:related_understanding}
+
+Document understanding has progressively expanded from recognizing text to modeling the relationships between textual, visual, and spatial information. LayoutLM jointly represents text and page layout and incorporates visual features associated with words~\cite{xu2019layoutlm}. LayoutLMv3 uses unified text and image masking together with word--patch alignment to support both text-centric and image-centric document tasks~\cite{huang2022layoutlmv3}. Donut follows an OCR-free approach, directly mapping document images to structured outputs and reducing dependence on a separate text-recognition pipeline~\cite{kim2021donut}. DocVQA evaluates question answering over document images and identifies document structure as an important source of difficulty~\cite{mathew2020docvqa}. These methods establish that reading words alone is insufficient for visually structured documents. Mechanical drawings introduce an additional requirement: graphical marks encode projected geometry, and observations across views may refer to one underlying feature. MechVQA addresses this domain through recognition, reasoning, and judgment tasks, together with domain-specific model training~\cite{kou2026mechvqa}. At the native CAD level, BRepNet performs message passing over boundary-representation entities, while UV-Net combines parametric surface and curve information with an adjacency graph~\cite{lambourne2021brepnet,jayaraman2020uvnet}. Their representations make geometric connectivity explicit, although their objectives differ from retrieving evidence for natural-language answers.
+
+GeoEvidence-RAG connects these representational perspectives through a local evidence unit. A unit retains both a visible observation and the identity of the engineering feature it describes, together with attributed properties and source information. This organization lets a sectional region and an orthographic region support different conditions concerning the same feature. It also keeps the identity needed for counting separate from the number of retrieved images.
+
+\subsection{Retrieval-augmented generation for visual and engineering documents}
+\label{sec:related_retrieval}
+
+Text-based RAG retrieves external passages and conditions generation on their contents~\cite{lewis2020rag}. Dense passage retrieval learns separate question and passage encoders, while ColBERT retains token-level interactions for fine-grained relevance scoring~\cite{karpukhin2020dpr,khattab2020colbert}. These strategies offer efficient access to large text collections, but their application to drawings depends on how graphical information is represented before indexing. A textual description can encode geometric relationships when they are explicitly extracted; ordinary OCR output or linearized text does not necessarily preserve them. Visual retrieval addresses this representational loss. CLIP learns transferable image--text alignment through contrastive supervision~\cite{radford2021clip}. ColPali represents document pages using multiple visual embeddings and matches query tokens to image patches through late interaction~\cite{faysse2024colpali}. VisRAG uses document images for both retrieval and generation, while PixelRAG retrieves web screenshots and supplies them directly to a vision-language model~\cite{yu2024visrag,wang2026pixelrag}. In mechanical engineering, MechRAG makes heterogeneous engineering records accessible through a multimodal retrieval and generation workflow~\cite{li2025mechrag}. These approaches establish useful mechanisms for preserving visual content and retrieving relevant records; their retrieval units and matching objectives provide different levels of access to local evidence.
+
+We use a frozen visual encoder for global retrieval and a lightweight reranker to assess feature alignment, key attributes, and supporting views. We train the reranker on pairs whose geometric differences affect the answer. For editable CAD models, we modify one feature and regenerate its renderings and evidence records. To prevent data leakage, we keep each part family, including its variants and views, in the same data partition.
+
+\subsection{Evidence attribution, selection, and collection-level reasoning}
+\label{sec:related_evidence}
+
+Several research directions improve the reliability and organization of retrieved context. RocketQA uses denoised hard negatives and data augmentation to strengthen dense retrieval~\cite{qu2020rocketqa}. Self-RAG learns to retrieve and critique evidence using reflection tokens, while corrective RAG evaluates retrieved material and can trigger corrective retrieval actions~\cite{asai2023selfrag,yan2024crag}. ALCE evaluates generated answers along dimensions including correctness and citation quality, and RARR retrieves supporting information to revise unsupported output~\cite{gao2023alce,gao2022rarr}. These studies make evidence support an explicit concern beyond fluent generation. Context selection also benefits from controlling redundancy: maximal marginal relevance balances query relevance against similarity to already selected content~\cite{carbonell1998mmr}. For broader context, RAPTOR recursively clusters and summarizes text into a retrieval tree, while GraphRAG constructs entity graphs and community summaries for collection-level questions~\cite{sarthi2024raptor,edge2024graphrag}. Their contributions address different needs, including relevance, attribution, diversity, and global synthesis. None of these objectives, considered alone, establishes that every eligible record has been included in an exact numerical comparison.
+
+MMR balances query relevance and novelty. We decompose each question into verifiable conditions and greedily select evidence under a budget. We rank candidates by additional condition coverage per unit cost, discounting redundant observations using feature identity. This lets distinct views of the same feature contribute evidence for different conditions. We link each condition to its supporting records and flag unresolved conditions. RAPTOR and GraphRAG synthesize broader context through hierarchical and graph-based summaries, respectively. For exact numerical queries, we scan a separate registry of eligible parts and check each for a usable attribute value. We trace aggregates to their source records and limit conclusions to the observed parts when registry coverage or attribute values are incomplete.
+
+\input{methods}
+
+\clearpage
+\section{Experiments}
+\label{sec:experiments}
+
+\begin{table}[!ht]
+  \centering
+  \caption{Preliminary CAD question answering results (\%).}
+  \label{tab:retrieval-comparison}
+  \footnotesize
+  \setlength{\tabcolsep}{1.6pt}
+  \renewcommand{\arraystretch}{1.15}
+  \resizebox{\linewidth}{!}{%
+  \begin{tabular}{@{}l*{4}{@{\hspace{4pt}}ccc}@{}}
+    \toprule
+    & \multicolumn{3}{c}{DeepCAD} & \multicolumn{3}{c}{TriView2CAD}
+    & \multicolumn{3}{c}{FCM} & \multicolumn{3}{c}{CADVQA} \\
+    \cmidrule(lr){2-4}\cmidrule(lr){5-7}\cmidrule(lr){8-10}\cmidrule(lr){11-13}
+    Method & Acc & Recall & F1 & Acc & Recall & F1
+           & Acc & Recall & F1 & Acc & Recall & F1 \\
+    \midrule
+    No retrieval & 88.00 & 93.00 & 93.00 & 81.00 & 93.67 & 93.67
+                 & 0.00 & 33.16 & 41.27 & & & \\
+    \midrule
+    \multicolumn{13}{@{}l}{\itshape Text-based retrieval} \\
+    \inputtablerows text-full-rows.tex
+    \midrule
+    \multicolumn{13}{@{}l}{\itshape Pixel-based retrieval} \\
+    PixelRAG (base) & 75.00 & 85.50 & 85.50 & 85.00 & 95.00 & 95.00
+                    & 0.00 & 38.78 & 47.50 & & & \\
+    PixelRAG & 78.00 & 87.00 & 87.00 & 86.00 & 95.33 & 95.33
+             & 0.00 & 39.29 & 46.53 & & & \\
+    \midrule
+    \multicolumn{13}{@{}l}{\itshape Fix-based retrieval} \\
+    GeoEvidence-RAG (ours) & & & & & & & & & & & & \\
+    \bottomrule
+  \end{tabular}}
+  \par\smallskip
+  \parbox{\linewidth}{\raggedright
+    Rows marked $\dagger$ use local Qwen3-VL-2B-Instruct (Q4\_K\_M).
+    The other populated rows use DeepSeek Flash. All methods receive the target image.
+    The text baselines share OCR regions and keep up to two passages ranked by BM25~\cite{robertson2009bm25}
+    or by cosine similarity of BGE-M3 dense embeddings~\cite{chen2024m3}.
+    Pixel retrieval adds the two highest-scoring tiles from four overlapping crops
+    of the target image. PixelRAG (base) uses Qwen3-VL-Embedding-2B and
+    PixelRAG applies the published LoRA checkpoint.
+    The DeepSeek rows use 100 derived DeepCAD sketches and 100 TriView2CAD drawings.
+    The full local runs use one derived sketch per official DeepCAD test model
+    and all 200,000 public TriView2CAD synthetic drawings.
+    FCM uses all 53 labeled subtractive-manufacturing images. Their OCR yielded no
+    passages above the confidence threshold, so the text systems used direct visual answers.
+    Acc is exact match per sample. Recall and F1 are micro-averaged over answer items.
+    Blank cells are pending evaluation.}
+\end{table}
+\FloatBarrier
+
+\begingroup
+\interlinepenalty=10000
+\bibliographystyle{elsarticle-num}
+\bibliography{references}
+\endgroup
+\end{document}

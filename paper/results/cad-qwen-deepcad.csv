@@ -1,0 +1,3 @@
+dataset,method,reader,samples,exact,true_positive,predicted_items,gold_items,acc,recall,f1,with_retrieved_context
+DeepCAD,OCR + BM25,qwen3-vl-2b-q4,8052,3497,10593,16104,16104,43.430203676105315,65.77868852459017,65.77868852459017,260
+DeepCAD,OCR + BGE-M3 (dense),qwen3-vl-2b-q4,8052,3497,10593,16104,16104,43.430203676105315,65.77868852459017,65.77868852459017,260

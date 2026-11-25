@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mechrag-evidence"
+version = "0.2.0"
+description = "Evidence-first retrieval and reranking for mechanical engineering RAG"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+
+[project.optional-dependencies]
+reranker = ["torch>=2.2"]
+benchmark = ["openai>=1.58", "pillow>=10", "tqdm>=4.66"]
+notebooks = [
+  "anthropic>=0.40",
+  "chromadb>=0.5",
+  "langchain-community>=0.3",
+  "langchain-openai>=0.2",
+  "matplotlib>=3.8",
+  "numpy>=1.26",
+  "open-clip-torch>=2.26",
+  "openai>=1.58",
+  "pillow>=10",
+  "pypdf>=5",
+  "sentence-transformers>=3",
+  "torch>=2.2",
+  "transformers>=4.45",
+]
+
+[tool.setuptools.packages.find]
+include = ["mechrag*"]
